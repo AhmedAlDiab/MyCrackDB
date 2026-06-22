@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="conan_rocksdb_librocksdb_vars_debug_x64.props"/>
+  </ImportGroup>
+  <PropertyGroup>
+    <ConanDebugPath>$(Conanrocksdb_librocksdbBinaryDirectories);$(ConanDebugPath)</ConanDebugPath>
+    <LocalDebuggerEnvironment>PATH=$(ConanDebugPath);%PATH%</LocalDebuggerEnvironment>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(Conanrocksdb_librocksdbIncludeDirectories)%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>$(Conanrocksdb_librocksdbPreprocessorDefinitions)%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>$(Conanrocksdb_librocksdbCompilerFlags) %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(Conanrocksdb_librocksdbLibraryDirectories)%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(Conanrocksdb_librocksdbLibraries)%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(Conanrocksdb_librocksdbSystemLibs)%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>$(Conanrocksdb_librocksdbLinkerFlags) %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+    <Midl>
+      <AdditionalIncludeDirectories>$(Conanrocksdb_librocksdbIncludeDirectories)%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </Midl>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(Conanrocksdb_librocksdbIncludeDirectories)%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>$(Conanrocksdb_librocksdbPreprocessorDefinitions)%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+</Project>

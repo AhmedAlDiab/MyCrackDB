@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="ConanVariables">
+    <Conanrocksdb_librocksdbRootFolder>C:\Users\ahmed\.conan2\p\rocksace55e2fda416\p</Conanrocksdb_librocksdbRootFolder>
+    <Conanrocksdb_librocksdbBinaryDirectories></Conanrocksdb_librocksdbBinaryDirectories>
+    <Conanrocksdb_librocksdbCompilerFlags></Conanrocksdb_librocksdbCompilerFlags>
+    <Conanrocksdb_librocksdbLinkerFlags></Conanrocksdb_librocksdbLinkerFlags>
+    <Conanrocksdb_librocksdbPreprocessorDefinitions></Conanrocksdb_librocksdbPreprocessorDefinitions>
+    <Conanrocksdb_librocksdbIncludeDirectories>$(Conanrocksdb_librocksdbRootFolder)/include;</Conanrocksdb_librocksdbIncludeDirectories>
+    <Conanrocksdb_librocksdbResourceDirectories></Conanrocksdb_librocksdbResourceDirectories>
+    <Conanrocksdb_librocksdbLibraryDirectories>$(Conanrocksdb_librocksdbRootFolder)/lib;</Conanrocksdb_librocksdbLibraryDirectories>
+    <Conanrocksdb_librocksdbLibraries>rocksdb.lib;</Conanrocksdb_librocksdbLibraries>
+    <Conanrocksdb_librocksdbSystemLibs>shlwapi.lib;rpcrt4.lib;</Conanrocksdb_librocksdbSystemLibs>
+  </PropertyGroup>
+</Project>
