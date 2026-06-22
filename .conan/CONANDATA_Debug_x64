@@ -2,3 +2,4 @@
 # To keep your changes, remove these comment lines, but the plugin won't be able to modify your requirements
 requirements:
 - rocksdb/10.5.1
+- openssl/4.0.1
