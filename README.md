@@ -19,18 +19,15 @@ To build this project, you will need:
 * `openssl/3.x.x` (Requires OpenSSL 3.0+ for native alias support)
 
 ## Building the Project (For Linux)
-
-This project uses **Conan** to manage dependencies. 
+This project uses Conan to manage dependencies.
 
 1. **Clone the repository:**
+
 ```bash
-   git clone https://github.com/AhmedAlDiab/MyCrackDB.git
-   cd MyCrackDB
+git clone https://github.com/AhmedAlDiab/MyCrackDB.git
+cd MyCrackDB
 ```
-
-2.**Install the Linux Build Tools:**
-Open your Linux terminal and install the base compilers and Conan. Conan will use these under the hood.
-
+2. **Install the Linux Build Tools: Open your Linux terminal and install the base compilers and Conan.**
 ```bash
 # Install GCC and CMake
 sudo apt update
@@ -42,18 +39,16 @@ source conan-env/bin/activate
 pip install conan
 conan profile detect --force
 ```
-3.**Run the install to generate files:**
+3. **Install dependencies using Conan:**
+```bash
+conan install . --build=missing -s compiler.cppstd=17 -s build_type=Release
+```
+4. **Manually run the build commands using the generated presets:**
+```bash
+cmake --preset conan-release
+cmake --build --preset conan-release
+```
 
-```bash
-conan install . -of=conan --build=missing -s compiler.cppstd=17 -s build_type=Release
-Manually run the build commands:
-```
-4.**Manually run the build commands:**
-```bash
-cd conan
-cmake .. -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
-cmake --build .
-```
 ## Usage
 
 Run the compiled executable from your terminal.
