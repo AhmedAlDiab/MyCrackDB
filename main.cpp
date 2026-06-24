@@ -123,6 +123,7 @@ void print_help() {
 int main(int argc, char* argv[]) {
     //TODO: implement UI (idk how but maybe web crow + json + html + js)    
     //TODO: threads for hashing????
+    //TODO: optimaize using filters
     if (argc < 2) { print_help(); return 1; }    
     // UTF-8 support for windows console
 #ifdef _WIN32
