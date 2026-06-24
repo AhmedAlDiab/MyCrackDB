@@ -23,8 +23,20 @@ std::string to_hex(const unsigned char* data, size_t len) {
     return oss.str();
 }
 
+// Convert hex input into raw binary for database lookup
+std::string from_hex(const std::string& hex) {
+    std::string binary;
+    for (size_t i = 0; i < hex.length(); i += 2) {
+        std::string byteString = hex.substr(i, 2);
+        char byte = (char)strtol(byteString.c_str(), nullptr, 16);
+        binary.push_back(byte);
+    }
+    return binary;
+}
+
 // Compute hash using OpenSSL EVP API ... Complex stuff
-std::string compute_hash(const std::string& input, const std::string& algo_name) {
+// Now returns raw binary string instead of hex (i think it will make it better?)
+std::string compute_hash_bin(const std::string& input, const std::string& algo_name) {
     // Load digest algorithm
     const EVP_MD* md = EVP_get_digestbyname(algo_name.c_str());
     if (!md) {
@@ -50,7 +62,8 @@ std::string compute_hash(const std::string& input, const std::string& algo_name)
             throw std::runtime_error("DigestFinal failed");
 
         EVP_MD_CTX_free(ctx);
-        return to_hex(hash, hash_len);
+        // RAW BINARY
+        return std::string(reinterpret_cast<char*>(hash), hash_len);
     }
     catch (...) {
         EVP_MD_CTX_free(ctx);
@@ -58,7 +71,7 @@ std::string compute_hash(const std::string& input, const std::string& algo_name)
     }
 }
 
-void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFamilyHandle*>& handles , rocksdb::Status& s, const std::string& plaintext)
+void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFamilyHandle*>& handles, rocksdb::Status& s, const std::string& plaintext)
 {
     //save time by skipping the generated ones
     std::string value;
@@ -74,11 +87,11 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
         "SHA2-384",
         "SHA2-224",
         "SHA2-512/256",
-        "SHA2-512/224",                
+        "SHA2-512/224",
         "SHA3-256",
         "SHA3-512",
         "SHA3-224",
-        "SHA3-384",                                                
+        "SHA3-384",
         "BLAKE2B-512",
         "BLAKE2S-256",
         "RIPEMD-160",
@@ -86,10 +99,11 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
         "MD5-SHA1"
     };
 
-    try {        
+    try {
         rocksdb::WriteBatch batch;
         for (int i = 0; i < algorithms.size(); ++i) {
-            batch.Put(handles[i + 1], compute_hash(plaintext, algorithms[i]), plaintext);
+            // Store the raw binary output as the key
+            batch.Put(handles[i + 1], compute_hash_bin(plaintext, algorithms[i]), plaintext);
         }
         batch.Put(handles[0], plaintext, "1");
         s = db->Write(rocksdb::WriteOptions(), &batch);
@@ -124,7 +138,7 @@ int main(int argc, char* argv[]) {
     //TODO: implement UI (idk how but maybe web crow + json + html + js)    
     //TODO: threads for hashing????
     //TODO: optimaize using filters
-    if (argc < 2) { print_help(); return 1; }    
+    if (argc < 2) { print_help(); return 1; }
     // UTF-8 support for windows console
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
@@ -147,26 +161,38 @@ int main(int argc, char* argv[]) {
     if (!s.ok()) {
         std::cerr << "Fatal: Could not open database. " << s.ToString() << "\n";
         return 1;
-    }    
+    }
     std::string arg = argv[1];
 
     if (arg == "-h" || arg == "--help") {
         print_help();
     }
     else if (arg == "-l") {
-        if (argc < 3) { std::cerr << "Missing hash\n"; return close_db_and_exit_with_error(db,handles); }
-        std::string cmd = argv[2];
+        if (argc < 3) { std::cerr << "Missing hash\n"; return close_db_and_exit_with_error(db, handles); }
+        std::string cmd_hex = argv[2];
+
+        // Convert the user's hex search string into raw binary to match the DB keys
+        std::string cmd_bin;
+        try {
+            cmd_bin = from_hex(cmd_hex);
+        }
+        catch (...) {
+            std::cerr << "Invalid hex input.\n";
+            return close_db_and_exit_with_error(db, handles);
+        }
+
         std::string value;
         bool Found = false;
         for (auto handle : handles)
         {
             if (handle == handles[0]) continue;
-            s = db->Get(rocksdb::ReadOptions(), handle, cmd, &value);
+            // Search using the binary key
+            s = db->Get(rocksdb::ReadOptions(), handle, cmd_bin, &value);
             if (s.ok()) {
                 Found = 1;
                 std::cout << "value: " << value << std::endl;
                 std::cout << "Algorithm: " << handle->GetName() << std::endl;
-            }            
+            }
         }
         if (!Found)
         {
@@ -182,7 +208,7 @@ int main(int argc, char* argv[]) {
         if (input == "-w") {
             if (argc < 4) { std::cerr << "Missing filename after -w\n"; return close_db_and_exit_with_error(db, handles); }
             std::string filename = argv[3];
-            std::ifstream f(filename);
+            std::ifstream f(filename, std::ios::binary);
             if (!f) { std::cerr << "Can't open " << filename << "\n"; return close_db_and_exit_with_error(db, handles); }
 
             std::string line;
@@ -210,7 +236,7 @@ int main(int argc, char* argv[]) {
     else {
         print_help();
     }
-    
+
     for (auto h : handles) db->DestroyColumnFamilyHandle(h);
     delete db;
     return 0;
