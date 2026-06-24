@@ -24,7 +24,7 @@ This project uses Conan to manage dependencies.
 1. **Clone the repository:**
 
 ```bash
-git clone https://github.com/AhmedAlDiab/MyCrackDB.git
+git clone -b linux_version https://github.com/AhmedAlDiab/MyCrackDB.git
 cd MyCrackDB
 ```
 2. **Install the Linux Build Tools: Open your Linux terminal and install the base compilers and Conan.**
