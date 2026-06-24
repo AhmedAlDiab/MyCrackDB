@@ -11,10 +11,26 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
+#include <queue>
+#include <vector>
+#include <csignal>
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
+
+// Global flag for graceful shutdown
+std::atomic<bool> g_shutdown_requested{ false };
+
+// Signal handler function
+void signal_handler(int signum) {
+    g_shutdown_requested = true;
+    std::cout << "\n[!] Interrupt received (Signal " << signum << "). Initiating graceful shutdown...\n";
+}
 
 // Convert binary hash to hex string (because Hash algorithms return raw bytes)
 std::string to_hex(const unsigned char* data, size_t len) {
@@ -37,7 +53,7 @@ std::string from_hex(const std::string& hex) {
     return binary;
 }
 
-// Compute hash using OpenSSL EVP API 
+// Compute hash using OpenSSL EVP API
 std::string compute_hash_bin(const std::string& input, const std::string& algo_name) {
     // Load digest algorithm
     const EVP_MD* md = EVP_get_digestbyname(algo_name.c_str());
@@ -141,6 +157,12 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
 
 int close_db_and_exit_with_error(rocksdb::DB* db, const std::vector<rocksdb::ColumnFamilyHandle*>& handles)
 {
+    // Safe flush even on error exits just in case
+    rocksdb::FlushOptions flush_opts;
+    flush_opts.wait = true;
+    for (auto h : handles) db->Flush(flush_opts, h);
+    db->Close();
+
     for (auto h : handles) db->DestroyColumnFamilyHandle(h);
     delete db;
     return 1;
@@ -158,8 +180,11 @@ void print_help() {
 }
 
 int main(int argc, char* argv[]) {
-    //TODO: implement UI (idk how but maybe web crow + json + html + js)    
-    //TODO: threads for hashing????    
+    // Register signal handlers for Ctrl+C and termination requests
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    //TODO: implement UI (idk how but maybe web crow + json + html + js)  
     if (argc < 2) { print_help(); return 1; }
     // UTF-8 support for windows console
 #ifdef _WIN32
@@ -269,29 +294,145 @@ int main(int argc, char* argv[]) {
             std::ifstream f(filename, std::ios::binary);
             if (!f) { std::cerr << "Can't open " << filename << "\n"; return close_db_and_exit_with_error(db, handles); }
 
+            unsigned int num_threads = std::thread::hardware_concurrency();
+            if (num_threads == 0) num_threads = 4;
+            std::cout << "Using " << num_threads << " threads\n";
+
+            std::queue<std::string> work_q;
+            std::mutex q_mutex;
+            std::mutex db_mutex; // Protects only DB point lookups, ID increment, and Writes
+
+            std::condition_variable cv_consumer;
+            std::condition_variable cv_producer;
+
+            std::atomic<bool> done_reading{ false };
+            std::atomic<size_t> done{ 0 };
+
+            static const std::vector<std::string> algorithms = {
+                "MD5", "SHA1", "SHA2-256", "SHA2-512", "SHA2-384", "SHA2-224", "SHA2-512/256", "SHA2-512/224",
+                "SHA3-256", "SHA3-512", "SHA3-224", "SHA3-384", "BLAKE2B-512", "BLAKE2S-256", "RIPEMD-160", "SM3", "MD5-SHA1"
+            };
+
+            auto worker = [&]() {
+                while (true) {
+                    std::string line;
+                    {
+                        std::unique_lock<std::mutex> lk(q_mutex);
+                        cv_consumer.wait(lk, [&] { return !work_q.empty() || done_reading.load(); });
+                        if (work_q.empty() && done_reading.load()) break;
+                        if (work_q.empty()) continue;
+
+                        line = std::move(work_q.front());
+                        work_q.pop();
+                    }
+
+                    // OPTIMIZATION: Wake up the producer thread because room just freed up in the queue
+                    cv_producer.notify_one();
+
+                    try {
+                        // 1. CPU WORK (NO LOCKS): Calculate ALL 17 hashes completely in parallel
+                        std::string md5_hash = compute_hash_bin(line, algorithms[0]);
+                        std::vector<std::string> computed_hashes;
+                        computed_hashes.reserve(algorithms.size() - 1);
+
+                        for (size_t i = 1; i < algorithms.size(); ++i) {
+                            computed_hashes.push_back(compute_hash_bin(line, algorithms[i]));
+                        }
+
+                        // 2. DB & CRITICAL TRANSACTION WORK (SHORT LOCK): 
+                        {
+                            std::lock_guard<std::mutex> lk(db_mutex);
+
+                            std::string existing_id;
+                            rocksdb::Status local_s = db->Get(rocksdb::ReadOptions(), handles[1], md5_hash, &existing_id);
+
+                            if (!local_s.ok()) { // Word is unique, store it
+                                current_id_count++;
+                                std::string id_str(reinterpret_cast<const char*>(&current_id_count), sizeof(current_id_count));
+
+                                rocksdb::WriteBatch batch;
+                                batch.Put(handles[0], id_str, line);
+                                batch.Put(handles[1], md5_hash, id_str);
+
+                                for (size_t i = 1; i < algorithms.size(); ++i) {
+                                    batch.Put(handles[i + 1], computed_hashes[i - 1], id_str);
+                                }
+                                batch.Put(handles[18], "ID_COUNT", id_str);
+
+                                rocksdb::WriteOptions write_options;
+                                write_options.disableWAL = true;
+                                local_s = db->Write(write_options, &batch);
+
+                                if (!local_s.ok()) {
+                                    std::cerr << "DB Write Error: " << local_s.ToString() << '\n';
+                                }
+                            }
+                        }
+                    }
+                    catch (const std::exception& ex) {
+                        std::cerr << "Worker Error: " << ex.what() << "\n";
+                    }
+
+                    size_t c = ++done;
+                    if (c % 50000 == 0) {
+                        std::cout << "\rProcessed " << c << " lines..." << std::flush;
+                    }
+                }
+                };
+
+            // Spin up the worker pool
+            std::vector<std::thread> pool;
+            for (unsigned int i = 0; i < num_threads; ++i) pool.emplace_back(worker);
+
+            // Producer loop: Read file lines safely
             std::string line;
-            size_t done = 0;
             while (std::getline(f, line)) {
+
+                // Break out of file reading if interrupt received
+                if (g_shutdown_requested) {
+                    std::cout << "\nStopping file read early. Waiting for workers to finish current queue...\n";
+                    break;
+                }
+
                 if (!line.empty() && line.back() == '\r')
                     line.pop_back();
                 if (!line.empty()) {
-                    GenerateAndStoreHashes(db, handles, s, line, current_id_count);
-                }
-                if (++done % 50000 == 0) {
-                    std::cout << "\rProcessed " << done << " lines..." << std::flush;
+                    std::unique_lock<std::mutex> lk(q_mutex);
+                    // OPTIMIZATION: Bounded queue capacity limit (100,000 items) prevents RAM exhaustion
+                    cv_producer.wait(lk, [&] { return work_q.size() < 100000; });
+
+                    work_q.push(std::move(line));
+                    cv_consumer.notify_one();
                 }
             }
-            std::cout << "\rProcessed " << done << " lines. Done.\n";
+
+            // Signal termination to workers
+            {
+                std::lock_guard<std::mutex> lk(q_mutex);
+                done_reading = true;
+            }
+            cv_consumer.notify_all();
+
+            for (auto& t : pool) t.join();
+
+            std::cout << "\rProcessed " << done.load() << " lines. Done.\n";
             std::cout << "Loaded " << filename << " Successfully\n";
             std::cout << "Total database words is now: " << current_id_count << std::endl;
 
-            std::cout << "\nTriggering Post-Import DB Compaction (This may take a while)...\n";
-            rocksdb::CompactRangeOptions compact_options;
-            for (auto h : handles) {
-                db->CompactRange(compact_options, h, nullptr, nullptr);
+            // Skip compaction if user requested a shutdown
+            if (!g_shutdown_requested) {
+                std::cout << "\nTriggering Post-Import DB Compaction (This may take a while)...\n";
+                rocksdb::CompactRangeOptions compact_options;
+                for (auto h : handles) {
+                    db->CompactRange(compact_options, h, nullptr, nullptr);
+                }
+                std::cout << "Compaction complete!" << std::endl;
             }
-            std::cout << "Compaction complete!" << std::endl;
+            else {
+                std::cout << "\nSkipping compaction due to shutdown request.\n";
+            }
         }
+
         else {
             GenerateAndStoreHashes(db, handles, s, input, current_id_count);
             std::cout << "Generated hashes for: " << input << std::endl;
@@ -302,7 +443,24 @@ int main(int argc, char* argv[]) {
         print_help();
     }
 
-    for (auto h : handles) db->DestroyColumnFamilyHandle(h);
+    // --- Safe Database Shutdown Sequence ---
+    std::cout << "Flushing MemTables to disk safely...\n";
+    rocksdb::FlushOptions flush_opts;
+    flush_opts.wait = true;
+    for (auto h : handles) {
+        db->Flush(flush_opts, h);
+    }
+
+    rocksdb::Status close_status = db->Close();
+    if (!close_status.ok()) {
+        std::cerr << "Warning: DB Close failed - " << close_status.ToString() << "\n";
+    }
+
+    for (auto h : handles) {
+        db->DestroyColumnFamilyHandle(h);
+    }
     delete db;
+
+    std::cout << "Database closed safely. Exiting.\n";
     return 0;
 }
