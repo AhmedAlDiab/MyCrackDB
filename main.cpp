@@ -442,8 +442,7 @@ int main(int argc, char* argv[]) {
     else {
         print_help();
     }
-
-    // --- Safe Database Shutdown Sequence ---
+    
     std::cout << "Flushing MemTables to disk safely...\n";
     rocksdb::FlushOptions flush_opts;
     flush_opts.wait = true;
@@ -451,14 +450,18 @@ int main(int argc, char* argv[]) {
         db->Flush(flush_opts, h);
     }
 
+    // Destroy handles FIRST while the DB is still open
+    for (auto h : handles) {
+        db->DestroyColumnFamilyHandle(h);
+    }
+
+    // Close the DB SECOND
     rocksdb::Status close_status = db->Close();
     if (!close_status.ok()) {
         std::cerr << "Warning: DB Close failed - " << close_status.ToString() << "\n";
     }
 
-    for (auto h : handles) {
-        db->DestroyColumnFamilyHandle(h);
-    }
+    // Finally, delete the object
     delete db;
 
     std::cout << "Database closed safely. Exiting.\n";
