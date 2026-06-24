@@ -18,7 +18,7 @@ To build this project, you will need:
 * `rocksdb/8.10.0` (or your preferred version)
 * `openssl/3.x.x` (Requires OpenSSL 3.0+ for native alias support)
 
-## Building the Project
+## Building the Project (For Linux)
 
 This project uses **Conan** to manage dependencies. 
 
@@ -28,18 +28,32 @@ This project uses **Conan** to manage dependencies.
    cd MyCrackDB
 ```
 
-2. **Install dependencies using Conan:**
-Run the following command to download and build the required libraries for C++17:
+2.**Install the Linux Build Tools:**
+Open your Linux terminal and install the base compilers and Conan. Conan will use these under the hood.
+
 ```bash
+# Install GCC and CMake
+sudo apt update
+sudo apt install build-essential cmake python3-pip python3-venv
+
+# Set up Conan
+python3 -m venv conan-env
+source conan-env/bin/activate
+pip install conan
 conan profile detect --force
-conan install . -of=conan --build=missing -s compiler.cppstd=17
 ```
+3.**Run the install to generate files:**
 
-
-- finally you can build it.
-
-
-
+```bash
+conan install . -of=conan --build=missing -s compiler.cppstd=17 -s build_type=Release
+Manually run the build commands:
+```
+4.**Manually run the build commands:**
+```bash
+cd conan
+cmake .. -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build .
+```
 ## Usage
 
 Run the compiled executable from your terminal.

@@ -1,20 +1,20 @@
-# This file is managed by the Conan Visual Studio Extension, contents will be overwritten.
-# To keep your changes, remove these comment lines, but the plugin won't be able to modify your requirements
-
 from conan import ConanFile
-from conan.tools.microsoft import vs_layout, MSBuildDeps
-class ConanApplication(ConanFile):
-    package_type = "application"
-    settings = "os", "compiler", "build_type", "arch"
+from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
 
-    def layout(self):
-        vs_layout(self)
+class MyCrackDBRecipe(ConanFile):
+    settings = "os", "compiler", "build_type", "arch"
+    
+    def requirements(self):
+        self.requires("rocksdb/10.5.1")
+        self.requires("openssl/4.0.1")
 
     def generate(self):
-        deps = MSBuildDeps(self)
+        tc = CMakeToolchain(self)
+        tc.generate()
+        deps = CMakeDeps(self)
         deps.generate()
 
-    def requirements(self):
-        requirements = self.conan_data.get('requirements', [])
-        for requirement in requirements:
-            self.requires(requirement)
+    def build(self):
+        cmake = CMake(self)
+        cmake.configure()
+        cmake.build()
