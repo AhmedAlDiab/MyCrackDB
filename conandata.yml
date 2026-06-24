@@ -3,3 +3,4 @@
 requirements:
 - rocksdb/10.5.1
 - openssl/4.0.1
+- zstd/1.5.7

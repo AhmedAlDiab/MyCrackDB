@@ -32,7 +32,7 @@ This project uses **Conan** to manage dependencies.
 Run the following command to download and build the required libraries for C++17:
 ```bash
 conan profile detect --force
-conan install . -of=conan --build=missing -s compiler.cppstd=17
+conan install . --build=rocksdb --build=zstd -o rocksdb/*:with_zstd=True -s compiler.cppstd=17 --output-folder=conan
 ```
 
 
@@ -50,9 +50,9 @@ Run the compiled executable from your terminal.
 Usage:
  MyCrackDB -h or --help         : Show help menu
  MyCrackDB -l <hash>            : Lookup a hash in the database
+ MyCrackDB -c                   : Display the total number of words in the database
  MyCrackDB -g <text>            : Generate and store hashes for a single string
  MyCrackDB -g -w <wordlist.txt> : Generate and store hashes for each line in a file
-
 ```
 
 ### Examples
