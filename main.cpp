@@ -18,6 +18,7 @@
 #include <queue>
 #include <vector>
 #include <csignal>
+#include <map>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -33,12 +34,14 @@ void signal_handler(int signum) {
 }
 
 // Convert binary hash to hex string (because Hash algorithms return raw bytes)
-std::string to_hex(const unsigned char* data, size_t len) {
+std::string to_hex(const std::string& data) {
     std::ostringstream oss;
     oss << std::hex << std::setfill('0');
-    for (size_t i = 0; i < len; ++i) {
-        oss << std::setw(2) << static_cast<unsigned int>(data[i]);
+
+    for (char c : data) {        
+        oss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(c));
     }
+
     return oss.str();
 }
 
@@ -88,37 +91,40 @@ std::string compute_hash_bin(const std::string& input, const std::string& algo_n
         throw; // rethrow exception
     }
 }
+static const std::vector<std::string> algorithms =
+{
+    "MD5",
+    "SHA1",
+    "SHA2-256",
+    "SHA2-512",
+    "SHA2-384",
+    "SHA2-224",
+    "SHA2-512/256",
+    "SHA2-512/224",
+    "SHA3-256",
+    "SHA3-512",
+    "SHA3-224",
+    "SHA3-384",
+    "BLAKE2B-512",
+    "BLAKE2S-256",
+    "RIPEMD-160",
+    "SM3",
+    "MD5-SHA1"
+};
 
 void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFamilyHandle*>& handles, rocksdb::Status& s, const std::string& plaintext, uint64_t& current_id)
 {
-    static const std::vector<std::string> algorithms =
-    {
-        "MD5",
-        "SHA1",
-        "SHA2-256",
-        "SHA2-512",
-        "SHA2-384",
-        "SHA2-224",
-        "SHA2-512/256",
-        "SHA2-512/224",
-        "SHA3-256",
-        "SHA3-512",
-        "SHA3-224",
-        "SHA3-384",
-        "BLAKE2B-512",
-        "BLAKE2S-256",
-        "RIPEMD-160",
-        "SM3",
-        "MD5-SHA1"
-    };
-
     try {
         // Compute MD5 first If i exists in CF1 Skip
         // This avoids generating saving massive space.
         std::string md5_hash = compute_hash_bin(plaintext, algorithms[0]);
         std::string existing_id;
         s = db->Get(rocksdb::ReadOptions(), handles[1], md5_hash, &existing_id);
-        if (s.ok()) return;
+        if (s.ok())
+        {
+            std::clog << "Already Generated" << std::endl;
+            return;
+        }
 
         // Increment the global ID counter.
         current_id++;
@@ -171,11 +177,15 @@ int close_db_and_exit_with_error(rocksdb::DB* db, const std::vector<rocksdb::Col
 void print_help() {
     std::cout <<
         "Usage:\n"
-        " MyCrackDB -h or --help : show help\n"
-        " MyCrackDB -l <hash> : lookup hash\n"
-        " MyCrackDB -c : count the total number of words in the database\n"
-        " MyCrackDB -g <text> : generate and store <text>\n"
-        " MyCrackDB -g -w wordlist.txt : generate and store each line from file as a value\n"
+        " MyCrackDB -h or --help                  : show help\n"
+        " MyCrackDB -l or --lookup <hash>         : lookup hash\n"
+        " MyCrackDB -ls or --list                 : display available hash algorithms\n"
+        " MyCrackDB -c or --count                 : count the total number of words in the database\n"
+        " MyCrackDB -g <text>                     : generate and store <text>\n"
+        " MyCrackDB -g <text> -d <algo1,algo2,..> : generate, store and display hashes for <text>\n"
+        "         (Don't add spaces between algos if no algorithm selected deafult is all)*\n"
+        "                    (Example: MyCrackDB -g ahmed -d MD5,SHA1)*\n"
+        " MyCrackDB -g -w wordlist.txt            : generate and store each line from file as a value\n"
         "\nExample: MyCrackDB -l 5d41402abc4b2a76b9719d911017c592\n";
 }
 
@@ -244,10 +254,18 @@ int main(int argc, char* argv[]) {
     if (arg == "-h" || arg == "--help") {
         print_help();
     }
-    else if (arg == "-c") {
+    else if (arg == "-ls" || arg == "--list")
+    {
+        for (int i = 0; i < algorithms.size() - 1; i++)
+        {
+            std::cout << algorithms[i] << "\n";
+        }
+        std::cout << algorithms[algorithms.size() - 1 ] << std::endl;
+    }
+    else if (arg == "-c" || arg == "--count") {
         std::cout << "Total words in database: " << current_id_count << std::endl;
     }
-    else if (arg == "-l") {
+    else if (arg == "-l" || arg == "--lookup") {
         if (argc < 3) { std::cerr << "Missing hash\n"; return close_db_and_exit_with_error(db, handles); }
         std::string cmd_hex = argv[2];
 
@@ -306,12 +324,7 @@ int main(int argc, char* argv[]) {
             std::condition_variable cv_producer;
 
             std::atomic<bool> done_reading{ false };
-            std::atomic<size_t> done{ 0 };
-
-            static const std::vector<std::string> algorithms = {
-                "MD5", "SHA1", "SHA2-256", "SHA2-512", "SHA2-384", "SHA2-224", "SHA2-512/256", "SHA2-512/224",
-                "SHA3-256", "SHA3-512", "SHA3-224", "SHA3-384", "BLAKE2B-512", "BLAKE2S-256", "RIPEMD-160", "SM3", "MD5-SHA1"
-            };
+            std::atomic<size_t> done{ 0 };            
 
             auto worker = [&]() {
                 while (true) {
@@ -432,18 +445,62 @@ int main(int argc, char* argv[]) {
                 std::cout << "\nSkipping compaction due to shutdown request.\n";
             }
         }
-
-        else {
+        else {            
             GenerateAndStoreHashes(db, handles, s, input, current_id_count);
             std::cout << "Generated hashes for: " << input << std::endl;
             std::cout << "Total database words is now: " << current_id_count << std::endl;
+            if (argc >= 4){  
+                std::cout << "Hashes for " << input <<":\n";                
+                std::string display = argv[3];
+                if (display == "-d")
+                {                    
+                    if (argc > 4)
+                    {                        
+                        std::string algs = argv[4];
+                        std::string tmp;
+                        std::map<std::string, int>Freq;                                               
+                        for (char &c : algs)c = toupper(c);
+                        for (int i = 0; i < algs.length(); i++)
+                        {
+                            if (algs[i] != ',')
+                                tmp += algs[i];
+                            else 
+                            {
+                                Freq[tmp]++; 
+                                tmp.clear();
+                            }
+                        }
+                        if (!tmp.empty()) Freq[tmp]++;
+                        for (const std::string& alg : algorithms) {                            
+                            if (Freq.count(alg)) {
+                                try {                                    
+                                    std::cout << alg << ": " << to_hex(compute_hash_bin(input, alg)) << "\n";
+                                }
+                                catch (const std::exception& e) {                                    
+                                    std::cerr << alg << ": [Error] " << e.what() << "\n";
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {                        
+                        for (std::string alg : algorithms) 
+                        {
+                            try {
+                                std::cout << alg << ": " << to_hex(compute_hash_bin(input, alg)) << "\n";
+                            }
+                            catch (const std::exception& e) {
+                                std::cerr << alg << ": [Error] " << e.what() << "\n";
+                            }
+                        }
+                    }
+                }                
+            }
         }
     }
     else {
         print_help();
-    }
-
-    std::cout << "Flushing MemTables to disk safely...\n";
+    }    
     rocksdb::FlushOptions flush_opts;
     flush_opts.wait = true;
     for (auto h : handles) {
@@ -462,8 +519,6 @@ int main(int argc, char* argv[]) {
     }
 
     // Finally, delete the object
-    delete db;
-
-    std::cout << "Database closed safely. Exiting.\n";
+    delete db;    
     return 0;
 }
