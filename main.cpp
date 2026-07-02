@@ -38,7 +38,7 @@ std::string to_hex(const std::string& data) {
     std::ostringstream oss;
     oss << std::hex << std::setfill('0');
 
-    for (char c : data) {        
+    for (char c : data) {
         oss << std::setw(2) << static_cast<unsigned int>(static_cast<unsigned char>(c));
     }
 
@@ -115,15 +115,33 @@ static const std::vector<std::string> algorithms =
 void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFamilyHandle*>& handles, rocksdb::Status& s, const std::string& plaintext, uint64_t& current_id)
 {
     try {
-        // Compute MD5 first If i exists in CF1 Skip
+        // Compute BLAKE2b-512 first If it exist in CF1 Skip (also it is faster in generation)
+        // MD5 Maybe will produce collision
+        // Example:
+        // first: TEXTCOLLBYfGiJUETHQ4hAcKSMd5zYpgqf1YRDhkmxHkhPWptrkoyz28wnI9V0aHeAuaKnak
+        // second: TEXTCOLLBYfGiJUETHQ4hEcKSMd5zYpgqf1YRDhkmxHkhPWptrkoyz28wnI9V0aHeAuaKnak
         // This avoids generating saving massive space.
-        std::string md5_hash = compute_hash_bin(plaintext, algorithms[0]);
+        std::string BLAKE2b_512_hash = compute_hash_bin(plaintext, algorithms[12]);
         std::string existing_id;
-        s = db->Get(rocksdb::ReadOptions(), handles[1], md5_hash, &existing_id);
+        s = db->Get(rocksdb::ReadOptions(), handles[13], BLAKE2b_512_hash, &existing_id);
         if (s.ok())
         {
-            std::clog << "Already Generated" << std::endl;
-            return;
+            std::clog << "Already Generated\n";
+            std::string lookup_plain;
+            s = db->Get(rocksdb::ReadOptions(), handles[0], existing_id, &lookup_plain);
+            if (lookup_plain == plaintext)
+            {
+                return;
+            }
+            std::clog << "BLAKE2b_512_hash Collision Detected (very not common)!: { " << plaintext << " } with { " << lookup_plain << " }\n";
+            //generate SHA3-512 (less collisions) and check
+            std::string SHA3_512_hash = compute_hash_bin(plaintext, algorithms[9]);
+            std::string existing_sha_id;//dummy
+            s = db->Get(rocksdb::ReadOptions(), handles[10], SHA3_512_hash, &existing_sha_id);
+            if (s.ok())
+            {
+                std::clog << "Already Generated\n";
+            }
         }
 
         // Increment the global ID counter.
@@ -135,11 +153,8 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
         // CF0: Store the uint64_t ID -> Plaintext
         batch.Put(handles[0], id_str, plaintext);
 
-        // CF 1: Store the MD5 (since we already computed it for the existence check)
-        batch.Put(handles[1], md5_hash, id_str);
-
-        // CF 2-17: Compute and store remaining algorithms
-        for (int i = 1; i < algorithms.size(); ++i) {
+        // CF 1-17: Compute and store remaining algorithms
+        for (int i = 0; i < algorithms.size(); ++i) {
             batch.Put(handles[i + 1], compute_hash_bin(plaintext, algorithms[i]), id_str);
         }
 
@@ -260,7 +275,7 @@ int main(int argc, char* argv[]) {
         {
             std::cout << algorithms[i] << "\n";
         }
-        std::cout << algorithms[algorithms.size() - 1 ] << std::endl;
+        std::cout << algorithms[algorithms.size() - 1] << std::endl;
     }
     else if (arg == "-c" || arg == "--count") {
         std::cout << "Total words in database: " << current_id_count << std::endl;
@@ -324,7 +339,7 @@ int main(int argc, char* argv[]) {
             std::condition_variable cv_producer;
 
             std::atomic<bool> done_reading{ false };
-            std::atomic<size_t> done{ 0 };            
+            std::atomic<size_t> done{ 0 };
 
             auto worker = [&]() {
                 while (true) {
@@ -344,20 +359,20 @@ int main(int argc, char* argv[]) {
 
                     try {
                         // 1. CPU WORK (NO LOCKS): Calculate ALL 17 hashes completely in parallel
-                        std::string md5_hash = compute_hash_bin(line, algorithms[0]);
                         std::vector<std::string> computed_hashes;
-                        computed_hashes.reserve(algorithms.size() - 1);
+                        computed_hashes.reserve(algorithms.size());
 
-                        for (size_t i = 1; i < algorithms.size(); ++i) {
+                        for (size_t i = 0; i < algorithms.size(); ++i) {
                             computed_hashes.push_back(compute_hash_bin(line, algorithms[i]));
                         }
+                        std::string blake2b_hash = computed_hashes[12];
 
                         // 2. DB & CRITICAL TRANSACTION WORK (SHORT LOCK): 
                         {
                             std::lock_guard<std::mutex> lk(db_mutex);
 
                             std::string existing_id;
-                            rocksdb::Status local_s = db->Get(rocksdb::ReadOptions(), handles[1], md5_hash, &existing_id);
+                            rocksdb::Status local_s = db->Get(rocksdb::ReadOptions(), handles[13], blake2b_hash, &existing_id);
 
                             if (!local_s.ok()) { // Word is unique, store it
                                 current_id_count++;
@@ -365,10 +380,9 @@ int main(int argc, char* argv[]) {
 
                                 rocksdb::WriteBatch batch;
                                 batch.Put(handles[0], id_str, line);
-                                batch.Put(handles[1], md5_hash, id_str);
 
-                                for (size_t i = 1; i < algorithms.size(); ++i) {
-                                    batch.Put(handles[i + 1], computed_hashes[i - 1], id_str);
+                                for (size_t i = 0; i < algorithms.size(); ++i) {
+                                    batch.Put(handles[i + 1], computed_hashes[i], id_str);
                                 }
                                 batch.Put(handles[18], "ID_COUNT", id_str);
 
@@ -445,46 +459,46 @@ int main(int argc, char* argv[]) {
                 std::cout << "\nSkipping compaction due to shutdown request.\n";
             }
         }
-        else {            
+        else {
             GenerateAndStoreHashes(db, handles, s, input, current_id_count);
             std::cout << "Generated hashes for: " << input << std::endl;
             std::cout << "Total database words is now: " << current_id_count << std::endl;
-            if (argc >= 4){  
-                std::cout << "Hashes for " << input <<":\n";                
+            if (argc >= 4) {
                 std::string display = argv[3];
                 if (display == "-d")
-                {                    
+                {
+                    std::cout << "Hashes for " << input << ":\n";
                     if (argc > 4)
-                    {                        
+                    {
                         std::string algs = argv[4];
                         std::string tmp;
-                        std::map<std::string, int>Freq;                                               
-                        for (char &c : algs)c = toupper(c);
+                        std::map<std::string, int>Freq;
+                        for (char& c : algs)c = toupper(c);
                         for (int i = 0; i < algs.length(); i++)
                         {
                             if (algs[i] != ',')
                                 tmp += algs[i];
-                            else 
+                            else
                             {
-                                Freq[tmp]++; 
+                                Freq[tmp]++;
                                 tmp.clear();
                             }
                         }
                         if (!tmp.empty()) Freq[tmp]++;
-                        for (const std::string& alg : algorithms) {                            
+                        for (const std::string& alg : algorithms) {
                             if (Freq.count(alg)) {
-                                try {                                    
+                                try {
                                     std::cout << alg << ": " << to_hex(compute_hash_bin(input, alg)) << "\n";
                                 }
-                                catch (const std::exception& e) {                                    
+                                catch (const std::exception& e) {
                                     std::cerr << alg << ": [Error] " << e.what() << "\n";
                                 }
                             }
                         }
                     }
                     else
-                    {                        
-                        for (std::string alg : algorithms) 
+                    {
+                        for (std::string alg : algorithms)
                         {
                             try {
                                 std::cout << alg << ": " << to_hex(compute_hash_bin(input, alg)) << "\n";
@@ -494,13 +508,13 @@ int main(int argc, char* argv[]) {
                             }
                         }
                     }
-                }                
+                }
             }
         }
     }
     else {
         print_help();
-    }    
+    }
     rocksdb::FlushOptions flush_opts;
     flush_opts.wait = true;
     for (auto h : handles) {
@@ -519,6 +533,6 @@ int main(int argc, char* argv[]) {
     }
 
     // Finally, delete the object
-    delete db;    
+    delete db;
     return 0;
 }
