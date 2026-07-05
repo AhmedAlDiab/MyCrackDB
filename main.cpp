@@ -57,11 +57,13 @@ std::string from_hex(const std::string& hex) {
 }
 
 // Compute hash using OpenSSL EVP API
-std::string compute_hash_bin(const std::string& input, const std::string& algo_name) {
-    // Load digest algorithm
-    const EVP_MD* md = EVP_get_digestbyname(algo_name.c_str());
+// NOTE: Takes a pre-resolved const EVP_MD* instead of an algorithm name string.
+// EVP_get_digestbyname() is a lookup into OpenSSL's internal digest table and is
+// no longer called here; it's resolved once at startup (see init_algorithm_digests())
+// instead of once per hash, per word, for every algorithm.
+std::string compute_hash_bin(const std::string& input, const EVP_MD* md) {
     if (!md) {
-        throw std::runtime_error("Unknown hash algorithm: " + algo_name);
+        throw std::runtime_error("Null digest algorithm");
     }
 
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
@@ -112,6 +114,24 @@ static const std::vector<std::string> algorithms =
     "MD5-SHA1"
 };
 
+// Cached EVP_MD* pointers, index-aligned with `algorithms`. Populated once by
+// init_algorithm_digests() at program startup so hot loops never need to call
+// EVP_get_digestbyname() again.
+static std::vector<const EVP_MD*> algo_mds;
+
+// Resolve every algorithm name to its EVP_MD* exactly once.
+void init_algorithm_digests() {
+    algo_mds.clear();
+    algo_mds.reserve(algorithms.size());
+    for (const auto& name : algorithms) {
+        const EVP_MD* md = EVP_get_digestbyname(name.c_str());
+        if (!md) {
+            throw std::runtime_error("Unknown hash algorithm: " + name);
+        }
+        algo_mds.push_back(md);
+    }
+}
+
 void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFamilyHandle*>& handles, rocksdb::Status& s, const std::string& plaintext, uint64_t& current_id)
 {
     try {
@@ -121,7 +141,7 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
         // first: TEXTCOLLBYfGiJUETHQ4hAcKSMd5zYpgqf1YRDhkmxHkhPWptrkoyz28wnI9V0aHeAuaKnak
         // second: TEXTCOLLBYfGiJUETHQ4hEcKSMd5zYpgqf1YRDhkmxHkhPWptrkoyz28wnI9V0aHeAuaKnak
         // This avoids generating saving massive space.
-        std::string BLAKE2b_512_hash = compute_hash_bin(plaintext, algorithms[12]);
+        std::string BLAKE2b_512_hash = compute_hash_bin(plaintext, algo_mds[12]);
         std::string existing_id;
         s = db->Get(rocksdb::ReadOptions(), handles[13], BLAKE2b_512_hash, &existing_id);
         if (s.ok())
@@ -135,7 +155,7 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
             }
             std::clog << "BLAKE2b_512_hash Collision Detected (very not common)!: { " << plaintext << " } with { " << lookup_plain << " }\n";
             //generate SHA3-512 (less collisions) and check
-            std::string SHA3_512_hash = compute_hash_bin(plaintext, algorithms[9]);
+            std::string SHA3_512_hash = compute_hash_bin(plaintext, algo_mds[9]);
             std::string existing_sha_id;//dummy
             s = db->Get(rocksdb::ReadOptions(), handles[10], SHA3_512_hash, &existing_sha_id);
             if (s.ok())
@@ -155,7 +175,7 @@ void GenerateAndStoreHashes(rocksdb::DB* db, const std::vector<rocksdb::ColumnFa
 
         // CF 1-17: Compute and store remaining algorithms
         for (int i = 0; i < algorithms.size(); ++i) {
-            batch.Put(handles[i + 1], compute_hash_bin(plaintext, algorithms[i]), id_str);
+            batch.Put(handles[i + 1], compute_hash_bin(plaintext, algo_mds[i]), id_str);
         }
 
         // CF 18 (Misc): Update the tracker with the newest highest ID
@@ -266,6 +286,16 @@ int main(int argc, char* argv[]) {
 
     std::string arg = argv[1];
 
+    // Resolve all EVP_MD* digest pointers once, up front, instead of doing an
+    // EVP_get_digestbyname() string lookup on every single hash computation.
+    try {
+        init_algorithm_digests();
+    }
+    catch (const std::exception& ex) {
+        std::cerr << "Fatal: " << ex.what() << "\n";
+        return close_db_and_exit_with_error(db, handles);
+    }
+
     if (arg == "-h" || arg == "--help") {
         print_help();
     }
@@ -363,7 +393,7 @@ int main(int argc, char* argv[]) {
                         computed_hashes.reserve(algorithms.size());
 
                         for (size_t i = 0; i < algorithms.size(); ++i) {
-                            computed_hashes.push_back(compute_hash_bin(line, algorithms[i]));
+                            computed_hashes.push_back(compute_hash_bin(line, algo_mds[i]));
                         }
                         std::string blake2b_hash = computed_hashes[12];
 
@@ -485,10 +515,11 @@ int main(int argc, char* argv[]) {
                             }
                         }
                         if (!tmp.empty()) Freq[tmp]++;
-                        for (const std::string& alg : algorithms) {
+                        for (size_t i = 0; i < algorithms.size(); ++i) {
+                            const std::string& alg = algorithms[i];
                             if (Freq.count(alg)) {
                                 try {
-                                    std::cout << alg << ": " << to_hex(compute_hash_bin(input, alg)) << "\n";
+                                    std::cout << alg << ": " << to_hex(compute_hash_bin(input, algo_mds[i])) << "\n";
                                 }
                                 catch (const std::exception& e) {
                                     std::cerr << alg << ": [Error] " << e.what() << "\n";
@@ -498,13 +529,13 @@ int main(int argc, char* argv[]) {
                     }
                     else
                     {
-                        for (std::string alg : algorithms)
+                        for (size_t i = 0; i < algorithms.size(); ++i)
                         {
                             try {
-                                std::cout << alg << ": " << to_hex(compute_hash_bin(input, alg)) << "\n";
+                                std::cout << algorithms[i] << ": " << to_hex(compute_hash_bin(input, algo_mds[i])) << "\n";
                             }
                             catch (const std::exception& e) {
-                                std::cerr << alg << ": [Error] " << e.what() << "\n";
+                                std::cerr << algorithms[i] << ": [Error] " << e.what() << "\n";
                             }
                         }
                     }
