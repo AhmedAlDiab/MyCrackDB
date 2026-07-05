@@ -41,51 +41,50 @@ conan install . --build=rocksdb --build=zstd -o rocksdb/*:with_zstd=True -s comp
 
 
 ## Usage
-
 Run the compiled executable from your terminal.
-
 ### Basic Commands
-
 ```text
 Usage:
- MyCrackDB -h or --help         : Show help menu
- MyCrackDB -l <hash>            : Lookup a hash in the database
- MyCrackDB -c                   : Display the total number of words in the database
- MyCrackDB -g <text>            : Generate and store hashes for a single string
- MyCrackDB -g -w <wordlist.txt> : Generate and store hashes for each line in a file
+ MyCrackDB -h or --help                  : show help
+ MyCrackDB -l or --lookup <hash>         : lookup hash
+ MyCrackDB -ls or --list                 : display available hash algorithms
+ MyCrackDB -c or --count                 : count the total number of words in the database
+ MyCrackDB -g <text>                     : generate and store <text>
+ MyCrackDB -g <text> -d <algo1,algo2,..> : generate, store and display hashes for <text>
+         (Don't add spaces between algos if no algorithm selected deafult is all)*
+                    (Example: MyCrackDB -g ahmed -d MD5,SHA1)*
+ MyCrackDB -g -w wordlist.txt            : generate and store each line from file as a value
 ```
-
 ### Examples
-
 **1. Generate hashes for a single word:**
-
 ```bash
 ./MyCrackDB -g "password123"
-
 ```
-
-**2. Ingest a massive dictionary/wordlist:**
-
+**2. Generate a word and display it in specific algorithms:**
+```bash
+./MyCrackDB -g ahmed -d MD5,SHA1
+```
+**3. Ingest a massive dictionary/wordlist:**
 ```bash
 ./MyCrackDB -g -w rockyou.txt
-
 ```
-
-**3. Lookup a hash to find its plaintext:**
-
+**4. Lookup a hash to find its plaintext:**
 ```bash
 ./MyCrackDB -l 5d41402abc4b2a76b9719d911017c592
 ```
-
 *Output:*
-
 ```text
 value: hello
 Algorithm: MD5
 ```
-
+**5. List all available hash algorithms:**
+```bash
+./MyCrackDB -ls
+```
+**6. Check how many words are currently stored:**
+```bash
+./MyCrackDB -c
+```
 ## Database Storage
-
-Upon first run, the tool will create a folder named `HashsDB` in the directory where the executable is launched. This folder contains the RocksDB database files.
-
+Upon first run, the tool will create a folder named `HashesDB` in the directory where the executable is launched. This folder contains the RocksDB database files.
 *Note: Ensure you have read/write permissions in the execution directory. Do not run multiple instances of MyCrackDB simultaneously, as RocksDB locks the database directory to a single process.*
