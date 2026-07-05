@@ -1,11 +1,13 @@
-# This file is managed by the Conan Visual Studio Extension, contents will be overwritten.
-# To keep your changes, remove these comment lines, but the plugin won't be able to modify your requirements
-
 from conan import ConanFile
 from conan.tools.microsoft import vs_layout, MSBuildDeps
+
 class ConanApplication(ConanFile):
     package_type = "application"
     settings = "os", "compiler", "build_type", "arch"
+
+    # ADD THIS: Force the ZSTD option on RocksDB
+    def configure(self):
+        self.options["rocksdb"].with_zstd = True
 
     def layout(self):
         vs_layout(self)
@@ -15,6 +17,7 @@ class ConanApplication(ConanFile):
         deps.generate()
 
     def requirements(self):
+        # Your existing logic
         requirements = self.conan_data.get('requirements', [])
         for requirement in requirements:
             self.requires(requirement)

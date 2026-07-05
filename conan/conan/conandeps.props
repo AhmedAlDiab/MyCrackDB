@@ -3,5 +3,6 @@
 	<ImportGroup Label="PropertySheets">
 		<Import Condition="'$(conan_rocksdb_props_imported)' != 'True'" Project="conan_rocksdb.props"/>
 		<Import Condition="'$(conan_openssl_props_imported)' != 'True'" Project="conan_openssl.props"/>
+		<Import Condition="'$(conan_zstd_props_imported)' != 'True'" Project="conan_zstd.props"/>
 	</ImportGroup>
 </Project>

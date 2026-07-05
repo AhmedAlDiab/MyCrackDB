@@ -59,9 +59,9 @@ Run the compiled executable from your terminal.
 Usage:
  MyCrackDB -h or --help         : Show help menu
  MyCrackDB -l <hash>            : Lookup a hash in the database
+ MyCrackDB -c                   : Display the total number of words in the database
  MyCrackDB -g <text>            : Generate and store hashes for a single string
  MyCrackDB -g -w <wordlist.txt> : Generate and store hashes for each line in a file
-
 ```
 
 ### Examples
