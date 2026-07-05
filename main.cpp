@@ -414,7 +414,9 @@ int main(int argc, char* argv[]) {
                                 for (size_t i = 0; i < algorithms.size(); ++i) {
                                     batch.Put(handles[i + 1], computed_hashes[i], id_str);
                                 }
-                                batch.Put(handles[18], "ID_COUNT", id_str);
+                                if (current_id_count % 50000 == 0) {
+                                    batch.Put(handles[18], "ID_COUNT", id_str);
+                                }
 
                                 rocksdb::WriteOptions write_options;
                                 write_options.disableWAL = true;
@@ -471,6 +473,11 @@ int main(int argc, char* argv[]) {
             cv_consumer.notify_all();
 
             for (auto& t : pool) t.join();
+
+            {
+                std::string id_str(reinterpret_cast<const char*>(&current_id_count), sizeof(current_id_count));
+                db->Put(rocksdb::WriteOptions(), handles[18], "ID_COUNT", id_str);
+            }
 
             std::cout << "\rProcessed " << done.load() << " lines. Done.\n";
             std::cout << "Loaded " << filename << " Successfully\n";
