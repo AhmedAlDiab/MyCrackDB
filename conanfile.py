@@ -15,7 +15,7 @@ class MyCrackDBRecipe(ConanFile):
 
     def requirements(self):
         self.requires("rocksdb/10.5.1")
-        self.requires("openssl/3.6.2")
+        self.requires("openssl/4.0.1")
 
     def generate(self):
         tc = CMakeToolchain(self)
